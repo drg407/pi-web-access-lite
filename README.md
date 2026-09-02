@@ -1,11 +1,22 @@
 # pi-web-access-lite
 
-Two small web tools for the [pi](https://pi.dev) coding agent: **keyless web search** and
-**SSRF-safe page fetching**. Zero npm dependencies, zero API keys — plain Node built-ins only.
+## About
+
+Two small web tools for the [pi](https://pi.dev) coding agent: **`web_search`** (keyless
+DuckDuckGo with automatic SearXNG / Brave fallback) and **`fetch_page`** (SSRF-safe page
+fetching). Zero npm dependencies, zero API keys required — plain Node built-ins only.
 
 Built because the popular [`pi-web-access`](https://pi.dev/packages/pi-web-access) package is
 8.4 MB / 150 files / 20+ search providers / video + PDF understanding — and for everyday
 research you mostly just need *search* and *fetch*, without the supply chain.
+
+The whole network behaviour of this extension fits in two source files (~300 lines each).
+There is no `node_modules`, no lockfile, and no third-party code anywhere in the chain —
+the audit is the code.
+
+**Current state (2026-09-02):** 49/49 offline tests passing; live-verified end-to-end
+through pi's loader, including the fallback chain answering for a rate-limited DuckDuckGo
+against a self-hosted SearXNG instance. See `VERIFIED.md` for commands, outputs, and dates.
 
 ## The benefit
 
@@ -41,14 +52,30 @@ fallback attempts after cancellation).
 | Order | Provider | Config | Notes |
 |---|---|---|---|
 | 1 | DuckDuckGo | none (keyless) | default |
-| 2..n | SearXNG instances | `PI_SEARXNG_URL="http://host1:8080,http://host2:8080"` | **self-hosted recommended** — queries never leave your machine. Instance must have `json` in `settings: search: formats` (official docker image: yes) |
+| 2..n | SearXNG instances | `PI_SEARXNG_URL="http://host1:8080,http://host2:8080"` | **self-hosted recommended** — queries never leave your machine. The instance must enable the JSON format (see example below — the official image does NOT) |
 | last | Brave Search | `PI_BRAVE_API_KEY="BSA..."` | free tier available; Brave does not track queries; independent index |
 
-Example — fully private search fallback via a local SearXNG:
+Example — fully private search fallback via a local SearXNG (docker **or** podman, both
+verified):
+
+The official image's default config has the JSON format **disabled** (the API answers 403),
+so mount a small settings file that enables it:
 
 ```bash
-docker run -d --name searxng -p 8888:8080 searxng/searxng
-export PI_SEARXNG_URL="http://127.0.0.1:8888"   # add to your shell profile or pi's env
+# 1. settings.yml (a one-off secret is enough for a local instance):
+#    use_default_settings: true
+#    server:
+#      secret_key: "<64 hex chars, e.g. openssl rand -hex 32>"
+#      limiter: false        # enable + Valkey sidecar if you expose beyond a trusted LAN
+#    search:
+#      formats: [html, json]
+
+# 2. run it (podman works identically):
+podman run -d --name searxng -p 8888:8080 \
+   -v $PWD/settings.yml:/etc/searxng/settings.yml:ro docker.io/searxng/searxng
+
+# 3. point pi at it (shell profile or pi's env):
+export PI_SEARXNG_URL="http://127.0.0.1:8888"
 ```
 
 Public SearXNG instances were surveyed on 2026-07-09 and **all tested ones were bot-walled
@@ -130,16 +157,19 @@ node --experimental-strip-types test.ts
 
 - `web-core.ts` — zero-dependency core: search, fetch, SSRF validation, HTML→text, entities.
 - `index.ts` — `pi.registerTool()` wiring for the two tools.
-- `test.ts` — 31 offline tests (network behaviour is recorded in `VERIFIED.md`, not tested).
+- `test.ts` — 49 offline tests (network behaviour is recorded in `VERIFIED.md`, not tested).
 - `VERIFIED.md` — live network verifications with commands, real outputs, and dates. Re-run
   when you suspect the DuckDuckGo markup contract changed.
 
 ## Limitations (by design)
 
-- One search provider (DuckDuckGo). No API-key providers, no fallback chains.
 - No PDF/video/GitHub-special-casing — that's what the bigger package is for.
 - DuckDuckGo's HTML endpoint rate-limits aggressive use (~10 fast requests); normal research
-  cadence is fine. The tool throws a clear error rather than returning garbage.
+  cadence is fine. With a SearXNG/Brave fallback configured, the chain absorbs those
+  incidents automatically; without one, the tool throws a clear error rather than returning
+  garbage.
+- SearXNG fallback requires a reachable instance (self-hosted recommended — public instances
+  are bot-walled, see above). Brave requires a (free-tier) API key.
 - Output truncated at 40K chars (context-window protection, not a bug).
 
 ## License
