@@ -2,14 +2,22 @@
 // Offline-only by design: network-dependent behaviour is recorded in VERIFIED.md,
 // not tested here (slow + flaky).
 import assert from "node:assert";
+import http from "node:http";
 import {
   decodeEntities,
   fetchPage,
   htmlToText,
   isBlockedIp,
+  parseBraveResults,
+  parseSearxngResults,
   resolveDdgUrl,
+  searchBrave,
   searchDuckDuckGo,
+  searchSearxng,
+  searchWeb,
+  searxngInstancesFromEnv,
   validatePublicUrl,
+  type SearchProviderSpec,
 } from "./web-core.ts";
 
 let pass = 0;
@@ -199,9 +207,196 @@ await t("ssrf: validatePublicUrl keeps rejecting invalid URL / bad scheme first"
   await assert.rejects(() => validatePublicUrl("ftp://example.com/x"), /Unsupported protocol/);
 });
 
-// NOTE: live checks of the DNS-resolution path (public domain allowed, domain resolving to
-// a private IP blocked, public->public redirect) are in VERIFIED.md, not here —
-// network behaviour is slow/flaky in test suites by design.
+// ---------- SearXNG / Brave parsers (offline fixtures; contracts verified against
+// primary sources, see VERIFIED.md) ----------
+const SEARXNG_FIXTURE = {
+  query: "godot",
+  results: [
+    { engine: "google", title: "RayCast3D — Godot", url: "https://docs.godotengine.org/en/stable/classes/class_raycast3d.html", content: "A ray in 3D space.\n   With  extra  spaces." },
+    { engine: "brave", title: "No URL Entry", content: "dropped" },
+    { engine: "brave", url: "https://x.example/y", content: "no title" },
+    null,
+    "junk",
+  ],
+  answers: [],
+  suggestions: [],
+};
+await t("searxng parse: valid fixture, filters incomplete entries", () => {
+  const hits = parseSearxngResults(SEARXNG_FIXTURE);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].title, "RayCast3D — Godot");
+  assert.equal(hits[0].url, "https://docs.godotengine.org/en/stable/classes/class_raycast3d.html");
+  assert.equal(hits[0].snippet, "A ray in 3D space. With extra spaces.");
+});
+await t("searxng parse: empty results", () => {
+  assert.deepEqual(parseSearxngResults({ query: "x", results: [] }), []);
+});
+await t("searxng parse: error object surfaces message", () => {
+  assert.throws(() => parseSearxngResults({ error: "No query" }), /SearXNG error: No query/);
+});
+await t("searxng parse: hostile inputs throw, never crash", () => {
+  assert.throws(() => parseSearxngResults(null), /not a JSON object/);
+  assert.throws(() => parseSearxngResults("[]"), /not a JSON object/);
+  assert.throws(() => parseSearxngResults({}), /no results\[\]/);
+  assert.throws(() => parseSearxngResults({ results: "nope" }), /no results\[\]/);
+  assert.equal(parseSearxngResults({ results: [null, 42, { title: 7 }] }).length, 0);
+});
+
+const BRAVE_FIXTURE = {
+  type: "search",
+  query: { original: "godot" },
+  web: {
+    results: [
+      { title: "Godot Docs", url: "https://godotengine.org", description: "The game engine." },
+      { title: "", url: "https://x.example" },
+      { title: "NoUrl" },
+    ],
+  },
+};
+await t("brave parse: valid fixture, filters incomplete entries", () => {
+  const hits = parseBraveResults(BRAVE_FIXTURE);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].title, "Godot Docs");
+  assert.equal(hits[0].snippet, "The game engine.");
+});
+await t("brave parse: hostile inputs throw, never crash", () => {
+  assert.throws(() => parseBraveResults(undefined), /not a JSON object/);
+  assert.throws(() => parseBraveResults({ web: {} }), /no web\.results\[\]/);
+  assert.throws(() => parseBraveResults({ message: "quota exceeded" }), /no web\.results\[\]/);
+  assert.deepEqual(parseBraveResults({ web: { results: [] } }), []);
+});
+
+// ---------- PI_SEARXNG_URL env parsing ----------
+await t("env: PI_SEARXNG_URL comma-separated, trimmed, empties dropped", () => {
+  const saved = process.env.PI_SEARXNG_URL;
+  try {
+    process.env.PI_SEARXNG_URL = " http://a.example/ , http://b.example , ,";
+    assert.deepEqual(searxngInstancesFromEnv(), ["http://a.example/", "http://b.example"]);
+    delete process.env.PI_SEARXNG_URL;
+    assert.deepEqual(searxngInstancesFromEnv(), []);
+    process.env.PI_SEARXNG_URL = "   ";
+    assert.deepEqual(searxngInstancesFromEnv(), []);
+  } finally {
+    if (saved === undefined) delete process.env.PI_SEARXNG_URL;
+    else process.env.PI_SEARXNG_URL = saved;
+  }
+});
+
+// ---------- fallback orchestration (injected providers — no network) ----------
+const okHits = [{ title: "t", url: "https://a.example", snippet: "" }];
+const failP = (name: string): SearchProviderSpec => ({
+  name,
+  search: async () => {
+    throw new Error(`${name} down`);
+  },
+});
+const okP = (name: string): SearchProviderSpec => ({
+  name,
+  search: async () => okHits,
+});
+await t("fallback: first provider wins", async () => {
+  const r = await searchWeb("q", 3, undefined, [okP("p1"), okP("p2")]);
+  assert.equal(r.provider, "p1");
+  assert.equal(r.hits.length, 1);
+});
+await t("fallback: skips failing provider to next", async () => {
+  const r = await searchWeb("q", 3, undefined, [failP("p1"), failP("p2"), okP("p3")]);
+  assert.equal(r.provider, "p3");
+});
+await t("fallback: all fail -> aggregated error naming each", async () => {
+  await assert.rejects(
+    () => searchWeb("q", 3, undefined, [failP("p1"), failP("p2")]),
+    /all providers[\s\S]*p1: p1 down[\s\S]*p2: p2 down/,
+  );
+});
+await t("fallback: user abort is rethrown, no fallback attempts", async () => {
+  const ac = new AbortController();
+  ac.abort();
+  let p2Called = false;
+  await assert.rejects(
+    searchWeb("q", 3, ac.signal, [
+      { name: "p1", search: async () => { throw new Error("p1 down"); } },
+      { name: "p2", search: async () => { p2Called = true; return okHits; } },
+    ]),
+    /p1 down/,
+  );
+  assert.equal(p2Called, false);
+});
+
+// ---------- SearXNG / Brave HTTP layer (in-process loopback mock server —
+// deterministic, not an external service) ----------
+function startMock(handler: (req: http.IncomingMessage, res: http.ServerResponse) => void): Promise<{ port: number; close: () => Promise<void> }> {
+  return new Promise((resolve) => {
+    const srv = http.createServer(handler);
+    srv.listen(0, "127.0.0.1", () => {
+      const port = (srv.address() as { port: number }).port;
+      resolve({ port, close: () => new Promise((r) => srv.close(() => r())) });
+    });
+  });
+}
+
+await t("searxng http: fixture JSON -> parsed hits, capped by numResults", async () => {
+  const m = await startMock((req, res) => {
+    assert.ok(req.url?.startsWith("/search?"));
+    assert.ok(req.url?.includes("format=json"));
+    assert.ok(req.url?.includes(`q=${encodeURIComponent("godot raycast")}`));
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({ results: Array.from({ length: 12 }, (_, i) => ({ title: `R${i}`, url: `https://e.example/${i}` })) }),
+    );
+  });
+  const hits = await searchSearxng("godot raycast", 3, `http://127.0.0.1:${m.port}`);
+  assert.equal(hits.length, 3);
+  assert.equal(hits[0].title, "R0");
+  await m.close();
+});
+await t("searxng http: 403 -> clear 'JSON disabled' error", async () => {
+  const m = await startMock((_req, res) => { res.statusCode = 403; res.end("no"); });
+  await assert.rejects(() => searchSearxng("q", 3, `http://127.0.0.1:${m.port}`), /JSON format disabled/);
+  await m.close();
+});
+await t("searxng http: HTML bot-wall -> 'non-JSON' error", async () => {
+  const m = await startMock((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<html>bot check</html>"); });
+  await assert.rejects(() => searchSearxng("q", 3, `http://127.0.0.1:${m.port}`), /non-JSON/);
+  await m.close();
+});
+await t("searxng http: trailing slash in base URL handled", async () => {
+  const m = await startMock((req, res) => {
+    assert.equal(req.url?.split("?")[0], "/search");
+    res.end(JSON.stringify({ results: [] }));
+  });
+  await searchSearxng("q", 3, `http://127.0.0.1:${m.port}/`);
+  await m.close();
+});
+await t("brave http: fixture JSON -> hits; token header sent", async () => {
+  const m = await startMock((req, res) => {
+    assert.equal(req.headers["x-subscription-token"], "test-key");
+    assert.ok(req.url?.includes("count=5"));
+    res.end(JSON.stringify({ web: { results: [{ title: "B1", url: "https://b.example", description: "d" }] } }));
+  });
+  const hits = await searchBrave("q", 5, "test-key", undefined, `http://127.0.0.1:${m.port}`);
+  assert.equal(hits[0].title, "B1");
+  await m.close();
+});
+await t("brave http: HTTP error -> status + body snippet", async () => {
+  const m = await startMock((_req, res) => { res.statusCode = 429; res.end(JSON.stringify({ message: "quota exceeded" })); });
+  await assert.rejects(() => searchBrave("q", 5, "bad-key", undefined, `http://127.0.0.1:${m.port}`), /429[\s\S]*quota exceeded/);
+  await m.close();
+});
+await t("brave http: count capped at 20", async () => {
+  let seenCount = "";
+  const m = await startMock((req, res) => {
+    seenCount = req.url?.match(/count=(\d+)/)?.[1] ?? "";
+    res.end(JSON.stringify({ web: { results: [] } }));
+  });
+  await searchBrave("q", 99, "k", undefined, `http://127.0.0.1:${m.port}`);
+  assert.equal(seenCount, "20");
+  await m.close();
+});
+
+// NOTE: live checks (DDG anomaly -> SearXNG fallback on a real instance; Brave with a real
+// key; public SearXNG instance survey) are in VERIFIED.md, not here — external network
+// behaviour is slow/flaky in test suites by design.
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

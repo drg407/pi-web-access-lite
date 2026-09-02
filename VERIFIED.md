@@ -72,6 +72,46 @@ Bugs the SSRF test battery caught (all fixed, see git-less history in this sessi
 Known residual risk (accepted): DNS rebinding between validation and connect is not pinned
 (would need undici dispatcher / socket-level lookup = an npm dependency, deliberately avoided).
 
+## Search fallbacks — contract verification & provider survey, 2026-07-09
+
+### API contracts (verified against primary sources, not guessed)
+
+**SearXNG JSON API** — from source, `searxng/searxng@master`:
+- `searx/webapp.py`: `GET /search` accepts `format` in `{html, json, csv, rss}`; returns
+  **HTTP 403** when the instance's `settings['search']['formats']` lacks `json`; errors come
+  back as `{"error": "..."}` with 400/500.
+- `searx/webutils.py::get_json_response`: body is
+  `{query, results: [result dicts], answers, corrections, infoboxes, suggestions, unresponsive_engines}`;
+  result dicts carry `title`, `url`, `content`.
+
+**Brave Web Search API** — from official docs (api-dashboard.search.brave.com):
+- `GET https://api.search.brave.com/res/v1/web/search?q=...&count=N` (count max 20), header
+  `X-Subscription-Token: <key>`, body `{web: {results: [{title, url, description, ...}]}}`.
+
+Live calls to Brave/SearXNG were NOT executed (no key / no reachable instance available at
+build time); HTTP+parse layers are covered by in-process loopback mock-server tests in
+`test.ts`, and parsers by fixture tests.
+
+### Public SearXNG instance survey (why self-hosting is the recommendation)
+
+Source: searx.space registry (`https://searx.space/data/instances.json`, 92 instances,
+20 with healthy search metrics on 2026-07-09). JSON API probed on the 12 top-ranked
+instances with a browser user-agent:
+
+| Instance | Result |
+|---|---|
+| searx.be | Anubis browser-verification wall |
+| search.bus-hit.me, search.ononoki.org, nordsearch.de, searxng.ch, searxng.deggo.fyi, searx.oloke.xyz, search.lumy.live | timeout / empty response |
+| opnxng.com, priv.au, paulgo.io, searx.tiekoetter.com, search.rhscz.eu, search.inetol.net, search.catboy.house | HTTP 429 |
+| searxng.site, searxng.website | Apache 403 |
+| search.disroot.org, baresearch.org, searxng.shreven.org, searx.sev.monster | Anubis / bot-check wall |
+| searx.linxx.net | "Forbidden: browser verification required" |
+
+**0 of 12 usable** from a plain HTTP client. Also probed: Mojeek (Altcha JS challenge),
+Mullvad search (connection refused), Marginalia (help page / tiny index).
+Conclusion: public instances gate the JSON API against non-browser traffic; a self-hosted
+instance (`docker run -d -p 8888:8080 searxng/searxng`) is the reliable, private fallback.
+
 ## Error-handling contract (from pi docs, extensions.md "Error Handling")
 
 "Tool `execute` errors must be signaled by throwing; the thrown error is caught, reported to the

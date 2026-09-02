@@ -14,7 +14,7 @@ research you mostly just need *search* and *fetch*, without the supply chain.
 | Size | 8.4 MB, 150 files, 9 deps | ~300 lines, 2 source files, **0 deps** |
 | npm supply chain | 9 runtime deps to audit | nothing to audit — no `node_modules`, no lockfile |
 | API keys | optional (20+ providers) | none (DuckDuckGo HTML endpoint) |
-| Search | 20+ providers w/ fallbacks | DuckDuckGo (keyless) |
+| Search | 20+ providers w/ fallbacks | DuckDuckGo (keyless) + optional SearXNG / Brave fallbacks |
 | Fetch | markdown extract, PDF, video, GitHub/YouTube special-casing | HTML→text, JSON/raw, 40K truncation |
 | SSRF protection | yes (remote fetchers opt-in) | **always on**: private/loopback/link-local/metadata blocked, every redirect hop re-validated |
 | Audit effort | read a package | read 2 files |
@@ -31,6 +31,32 @@ Keyless DuckDuckGo search. Returns numbered title / URL / snippet lists.
 web_search({ query: "godot 4 RayCast3D" })
 web_search({ query: "rust async", num_results: 10 })   // default 8, cap 20
 ```
+
+### Search providers & fallback (automatic)
+
+`web_search` tries providers in order and uses the first that succeeds; the output names the
+provider that answered. Every attempt has an 8s timeout; an Esc abort is respected (no
+fallback attempts after cancellation).
+
+| Order | Provider | Config | Notes |
+|---|---|---|---|
+| 1 | DuckDuckGo | none (keyless) | default |
+| 2..n | SearXNG instances | `PI_SEARXNG_URL="http://host1:8080,http://host2:8080"` | **self-hosted recommended** — queries never leave your machine. Instance must have `json` in `settings: search: formats` (official docker image: yes) |
+| last | Brave Search | `PI_BRAVE_API_KEY="BSA..."` | free tier available; Brave does not track queries; independent index |
+
+Example — fully private search fallback via a local SearXNG:
+
+```bash
+docker run -d --name searxng -p 8888:8080 searxng/searxng
+export PI_SEARXNG_URL="http://127.0.0.1:8888"   # add to your shell profile or pi's env
+```
+
+Public SearXNG instances were surveyed on 2026-07-09 and **all tested ones were bot-walled
+or rate-limited** for non-browser clients — self-hosting is the reliable option. Details in
+`VERIFIED.md`.
+
+> The fallback endpoints come from your environment, not from the agent, so the model cannot
+> influence which instance is contacted (no SSRF surface here).
 
 ### `fetch_page`
 Fetch an http(s) URL as readable text. HTML is converted to plain text; JSON/XML/plain text
