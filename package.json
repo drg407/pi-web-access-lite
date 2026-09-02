@@ -1,0 +1,18 @@
+{
+  "name": "pi-web-access-lite",
+  "version": "0.1.0",
+  "description": "Minimal web tools for the pi coding agent: keyless DuckDuckGo search + SSRF-safe page fetching. Zero npm dependencies.",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "license": "MIT"
+}
