@@ -4,15 +4,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
   fetchPage,
-  searchDuckDuckGo,
+  searchWeb,
   type FetchedPage,
   type SearchHit,
 } from "./web-core.ts";
 
-function hitsToText(hits: SearchHit[], query: string): string {
-  if (hits.length === 0) return `Search: "${query}"\n\n(no results)`;
+function hitsToText(hits: SearchHit[], query: string, provider: string): string {
+  if (hits.length === 0) return `Search: "${query}" (via ${provider})\n\n(no results)`;
   return (
-    `Search: "${query}"\n\n` +
+    `Search: "${query}" (via ${provider})\n\n` +
     hits
       .map((h, i) => `${i + 1}. ${h.title}\n   ${h.url}${h.snippet ? `\n   ${h.snippet}` : ""}`)
       .join("\n\n")
@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web via keyless DuckDuckGo. Returns titles, URLs, snippets. Use fetch_page to read a result in full.",
+      "Search the web. Primary: keyless DuckDuckGo; automatic fallback to SearXNG (PI_SEARXNG_URL) and Brave (PI_BRAVE_API_KEY) when configured. Output names the provider that answered. Returns titles, URLs, snippets. Use fetch_page to read a result in full.",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
       num_results: Type.Optional(
@@ -39,10 +39,10 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, signal) {
-      const hits = await searchDuckDuckGo(params.query, params.num_results ?? 8, signal);
+      const { provider, hits } = await searchWeb(params.query, params.num_results ?? 8, signal);
       return {
-        content: [{ type: "text" as const, text: hitsToText(hits, params.query) }],
-        details: { count: hits.length },
+        content: [{ type: "text" as const, text: hitsToText(hits, params.query, provider) }],
+        details: { count: hits.length, provider },
       };
     },
   });
