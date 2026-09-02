@@ -4,6 +4,36 @@ Environment-dependent behaviour (network) is recorded here per working rules, no
 `test.ts` (network tests are slow/flaky and got deleted everywhere else). Re-run the commands
 when you suspect the external contracts changed (DDG markup, endpoints).
 
+## 2026-09-02
+
+### SearXNG official image: JSON API is DISABLED by default (deployment gotcha)
+
+- `GET /search?q=...&format=json` against the stock official image (podman, no config
+  mounted) → **HTTP 403 Forbidden** (not a network error — the format is not enabled).
+- Fix verified: mount a `settings.yml` with `use_default_settings: true`,
+  `search.formats: [html, json]`, and a `server.secret_key` → **HTTP 200, 20–32 results**.
+- podman 5.7 works identically to docker; note it requires the fully-qualified image name
+  (`docker.io/searxng/searxng` — short-name resolution is off by default).
+- `server.limiter: true` → `ERROR: The limiter requires Valkey` — the limiter has a hard
+  Valkey (Redis fork) sidecar dependency. Leave it off for trusted-LAN instances.
+
+### Extension re-verification (end-to-end through pi's real jiti loader)
+
+- **49/49 offline tests**, both the repo copy and the installed copy; files verified in sync.
+- `web_search` live, default chain (DDG → SearXNG): **in the field, DuckDuckGo was
+  rate-limiting and the chain fell back to a self-hosted SearXNG on its own**, returning
+  results; the provider that answered is named in the output
+  (`Search: "…" (via searxng:<host>)`).
+- `fetch_page` live: Godot documentation page → 40,239 chars clean extracted text.
+- SSRF attack matrix (executed through a wrapper replicating pi's runner): loopback, cloud
+  metadata `169.254.169.254`, RFC1918, **v4-mapped IPv6 bypass** (`[::ffff:127.0.0.1]`,
+  normalized to `::ffff:7f00:1` before the range check), `localhost` name, `file://` scheme,
+  and a garbage string — all blocked/rejected with clear, actionable messages.
+- Error contract confirmed in pi's source (`@earendil-works/pi-agent-core`,
+  `agent-loop.js` `executePreparedToolCall`): a tool `execute()` rejection is caught and
+  delivered to the model as `{ result: <error message>, isError: true }` — the extension's
+  throw-based fail-fast is the intended pattern.
+
 ## 2026-07-09
 
 ### DuckDuckGo keyless search endpoint
