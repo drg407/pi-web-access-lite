@@ -6,11 +6,12 @@ Two small web tools for the [pi](https://pi.dev) coding agent: **`web_search`** 
 DuckDuckGo with automatic SearXNG / Brave fallback) and **`fetch_page`** (SSRF-safe page
 fetching). Zero npm dependencies, zero API keys required — plain Node built-ins only.
 
-Built because the popular [`pi-web-access`](https://pi.dev/packages/pi-web-access) package is
-8.4 MB / 150 files / 20+ search providers / video + PDF understanding — and for everyday
-research you mostly just need *search* and *fetch*, without the supply chain.
+Built because the popular [`pi-web-access`](https://pi.dev/packages/pi-web-access) package
+(v0.27.0, measured 2026-09-02) is 7.6 MB / 73 files / 9 runtime deps, with 12 hosted fetch
+providers alone plus video/PDF understanding — and for everyday research you mostly just
+need *search* and *fetch*, without the supply chain.
 
-The whole network behaviour of this extension fits in two source files (~300 lines each).
+The whole network behaviour of this extension fits in two source files (616 lines total).
 There is no `node_modules`, no lockfile, and no third-party code anywhere in the chain —
 the audit is the code.
 
@@ -22,16 +23,16 @@ against a self-hosted SearXNG instance. See `VERIFIED.md` for commands, outputs,
 
 | | pi-web-access (npm) | pi-web-access-lite (this) |
 |---|---|---|
-| Size | 8.4 MB, 150 files, 9 deps | ~300 lines, 2 source files, **0 deps** |
+| Size | 7.6 MB, 73 files, 9 deps (v0.27.0) | 616 lines, 2 source files, **0 deps** |
 | npm supply chain | 9 runtime deps to audit | nothing to audit — no `node_modules`, no lockfile |
 | API keys | optional (20+ providers) | none (DuckDuckGo HTML endpoint) |
-| Search | 20+ providers w/ fallbacks | DuckDuckGo (keyless) + optional SearXNG / Brave fallbacks |
+| Search | multiple hosted backends w/ fallbacks | DuckDuckGo (keyless) + optional SearXNG / Brave fallbacks |
 | Fetch | markdown extract, PDF, video, GitHub/YouTube special-casing | HTML→text, JSON/raw, 40K truncation |
 | SSRF protection | yes (remote fetchers opt-in) | **always on**: private/loopback/link-local/metadata blocked, every redirect hop re-validated |
 | Audit effort | read a package | read 2 files |
 
-The pitch: **the entire network behaviour of this tool fits in two files you can read in ten
-minutes**, and there is no third-party code anywhere in the chain.
+The pitch: **the entire network behaviour of this tool fits in two files you can read in a
+quarter-hour**, and there is no third-party code anywhere in the chain.
 
 ## Tools
 
@@ -95,9 +96,10 @@ fetch_page({ url: "https://docs.godotengine.org/en/stable/classes/class_raycast3
 fetch_page({ url: "https://api.github.com/repos/godotengine/godot" })  // JSON returned raw
 ```
 
-For binaries, downloads, raw HTML, non-http(s) schemes, or intentional local-network access
-(e.g. your local LLM server at `127.0.0.1:11434`), the tool deliberately refuses and points
-you at `bash curl`.
+For binaries, downloads, and non-http(s) schemes the tool refuses and points you at
+`bash curl`; for raw HTML you get the extracted text instead (use `bash curl` if you need
+the raw markup); and intentional local-network access (e.g. your local LLM server at
+`127.0.0.1:11434`) is blocked by the SSRF guard — by design, use `bash curl` there too.
 
 ## Security
 
