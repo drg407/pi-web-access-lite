@@ -4,6 +4,25 @@ Environment-dependent behaviour (network) is recorded here per working rules, no
 `test.ts` (network tests are slow/flaky and got deleted everywhere else). Re-run the commands
 when you suspect the external contracts changed (DDG markup, endpoints).
 
+## 2026-09-15
+
+### fetch_page live behaviour (Perplexity docs, via the installed pi tool)
+
+Run through pi's live `fetch_page` tool (this extension, as installed):
+
+- `https://docs.perplexity.ai/docs/search/quickstart` → 200, `text/html`, 116,389 chars
+total, HTML→text extraction, truncated at the 40,000-char cap with the standard notice
+(large JS-heavy docs page — extraction held up).
+- `https://docs.perplexity.ai/docs/getting-started/pricing.md` → 200, `text/markdown`,
+110,563 chars, returned raw as documented for non-HTML text.
+- `https://docs.perplexity.ai/docs/search/pricing` → **HTTP 404** reported as a tool error
+(`HTTP 404 for <url>`), consistent with the 2026-07-09 404 contract.
+
+Context: evaluation of the Perplexity Search API as an optional `web_search` provider
+(API shape and pricing were reviewed from these pages). Outcome: **rejected** — it is a
+paid, keyed, cloud service ($5/1,000 requests); the "zero API keys / self-hostable"
+design excludes it. Same decision pattern as the 2026-09-02 Brave removal.
+
 ## 2026-09-02
 
 ### Brave provider REMOVED
