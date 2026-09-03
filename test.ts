@@ -8,10 +8,8 @@ import {
   fetchPage,
   htmlToText,
   isBlockedIp,
-  parseBraveResults,
   parseSearxngResults,
   resolveDdgUrl,
-  searchBrave,
   searchDuckDuckGo,
   searchSearxng,
   searchWeb,
@@ -207,7 +205,7 @@ await t("ssrf: validatePublicUrl keeps rejecting invalid URL / bad scheme first"
   await assert.rejects(() => validatePublicUrl("ftp://example.com/x"), /Unsupported protocol/);
 });
 
-// ---------- SearXNG / Brave parsers (offline fixtures; contracts verified against
+// ---------- SearXNG parser (offline fixture; contract verified against
 // primary sources, see VERIFIED.md) ----------
 const SEARXNG_FIXTURE = {
   query: "godot",
@@ -240,30 +238,6 @@ await t("searxng parse: hostile inputs throw, never crash", () => {
   assert.throws(() => parseSearxngResults({}), /no results\[\]/);
   assert.throws(() => parseSearxngResults({ results: "nope" }), /no results\[\]/);
   assert.equal(parseSearxngResults({ results: [null, 42, { title: 7 }] }).length, 0);
-});
-
-const BRAVE_FIXTURE = {
-  type: "search",
-  query: { original: "godot" },
-  web: {
-    results: [
-      { title: "Godot Docs", url: "https://godotengine.org", description: "The game engine." },
-      { title: "", url: "https://x.example" },
-      { title: "NoUrl" },
-    ],
-  },
-};
-await t("brave parse: valid fixture, filters incomplete entries", () => {
-  const hits = parseBraveResults(BRAVE_FIXTURE);
-  assert.equal(hits.length, 1);
-  assert.equal(hits[0].title, "Godot Docs");
-  assert.equal(hits[0].snippet, "The game engine.");
-});
-await t("brave parse: hostile inputs throw, never crash", () => {
-  assert.throws(() => parseBraveResults(undefined), /not a JSON object/);
-  assert.throws(() => parseBraveResults({ web: {} }), /no web\.results\[\]/);
-  assert.throws(() => parseBraveResults({ message: "quota exceeded" }), /no web\.results\[\]/);
-  assert.deepEqual(parseBraveResults({ web: { results: [] } }), []);
 });
 
 // ---------- PI_SEARXNG_URL env parsing ----------
@@ -323,7 +297,7 @@ await t("fallback: user abort is rethrown, no fallback attempts", async () => {
   assert.equal(p2Called, false);
 });
 
-// ---------- SearXNG / Brave HTTP layer (in-process loopback mock server —
+// ---------- SearXNG HTTP layer (in-process loopback mock server —
 // deterministic, not an external service) ----------
 function startMock(handler: (req: http.IncomingMessage, res: http.ServerResponse) => void): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve) => {
@@ -368,34 +342,8 @@ await t("searxng http: trailing slash in base URL handled", async () => {
   await searchSearxng("q", 3, `http://127.0.0.1:${m.port}/`);
   await m.close();
 });
-await t("brave http: fixture JSON -> hits; token header sent", async () => {
-  const m = await startMock((req, res) => {
-    assert.equal(req.headers["x-subscription-token"], "test-key");
-    assert.ok(req.url?.includes("count=5"));
-    res.end(JSON.stringify({ web: { results: [{ title: "B1", url: "https://b.example", description: "d" }] } }));
-  });
-  const hits = await searchBrave("q", 5, "test-key", undefined, `http://127.0.0.1:${m.port}`);
-  assert.equal(hits[0].title, "B1");
-  await m.close();
-});
-await t("brave http: HTTP error -> status + body snippet", async () => {
-  const m = await startMock((_req, res) => { res.statusCode = 429; res.end(JSON.stringify({ message: "quota exceeded" })); });
-  await assert.rejects(() => searchBrave("q", 5, "bad-key", undefined, `http://127.0.0.1:${m.port}`), /429[\s\S]*quota exceeded/);
-  await m.close();
-});
-await t("brave http: count capped at 20", async () => {
-  let seenCount = "";
-  const m = await startMock((req, res) => {
-    seenCount = req.url?.match(/count=(\d+)/)?.[1] ?? "";
-    res.end(JSON.stringify({ web: { results: [] } }));
-  });
-  await searchBrave("q", 99, "k", undefined, `http://127.0.0.1:${m.port}`);
-  assert.equal(seenCount, "20");
-  await m.close();
-});
-
-// NOTE: live checks (DDG anomaly -> SearXNG fallback on a real instance; Brave with a real
-// key; public SearXNG instance survey) are in VERIFIED.md, not here — external network
+// NOTE: live checks (DDG anomaly -> SearXNG fallback on a real instance; public SearXNG
+// instance survey) are in VERIFIED.md, not here — external network
 // behaviour is slow/flaky in test suites by design.
 
 console.log(`\n${pass} passed, ${fail} failed`);

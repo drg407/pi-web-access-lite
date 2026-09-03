@@ -364,15 +364,12 @@ export async function fetchPage(
 // ====================== Search providers & fallbacks ======================
 //
 // Chain: DuckDuckGo (keyless, default) -> SearXNG (PI_SEARXNG_URL, comma-separated
-// instance URLs — self-hosted strongly recommended: queries never leave your machine)
-// -> Brave (PI_BRAVE_API_KEY, no query tracking, free tier).
+// instance URLs — self-hosted strongly recommended: queries never leave your machine).
 //
-// Contracts verified 2026-07-09 against primary sources:
+// Contract verified 2026-07-09 against primary sources:
 // - SearXNG: searx/webapp.py + searx/webutils.py (master). GET /search?format=json
 //   -> {query, results: [{title, url, content, ...}]}; HTTP 403 when the instance's
 //   settings.search.formats lacks "json"; errors come back as {"error": "..."}.
-// - Brave: official docs (api-dashboard.search.brave.com). GET /res/v1/web/search?q=&count=
-//   with header X-Subscription-Token -> {web: {results: [{title, url, description, ...}]}}.
 //
 // NOTE: fallback endpoints come from user config (env), NOT from model input, so the
 // SSRF guard does not apply here — the model cannot influence which instance is used.
@@ -406,26 +403,6 @@ export function parseSearxngResults(json: unknown): SearchHit[] {
     .filter((h) => h.title && h.url);
 }
 
-/** Parse a Brave web-search JSON response into hits. Throws on malformed responses. */
-export function parseBraveResults(json: unknown): SearchHit[] {
-  if (typeof json !== "object" || json === null) {
-    throw new Error("Brave: response is not a JSON object");
-  }
-  const obj = json as Record<string, unknown>;
-  const web = (typeof obj.web === "object" && obj.web !== null ? obj.web : {}) as Record<string, unknown>;
-  if (!Array.isArray(web.results)) throw new Error("Brave: response has no web.results[]");
-  return web.results
-    .map((r): SearchHit => {
-      const o = (typeof r === "object" && r !== null ? r : {}) as Record<string, unknown>;
-      return {
-        title: typeof o.title === "string" ? o.title.trim() : "",
-        url: typeof o.url === "string" ? o.url : "",
-        snippet: typeof o.description === "string" ? o.description.replace(/\s+/g, " ").trim() : "",
-      };
-    })
-    .filter((h) => h.title && h.url);
-}
-
 /** Query a SearXNG instance's JSON API. */
 export async function searchSearxng(
   query: string,
@@ -453,34 +430,6 @@ export async function searchSearxng(
     throw new Error(`SearXNG ${base}: non-JSON response (bot wall or proxy?)`);
   }
   return parseSearxngResults(json).slice(0, Math.max(1, Math.min(numResults, 20)));
-}
-
-/** Query the Brave Search API. */
-export async function searchBrave(
-  query: string,
-  numResults: number,
-  apiKey: string,
-  signal?: AbortSignal,
-  baseUrl = "https://api.search.brave.com",
-): Promise<SearchHit[]> {
-  const count = Math.max(1, Math.min(numResults, 20));
-  const url = `${baseUrl.replace(/\/+$/, "")}/res/v1/web/search?q=${encodeURIComponent(query)}&count=${count}`;
-  const res = await fetch(url, {
-    headers: { accept: "application/json", "X-Subscription-Token": apiKey },
-    signal: attemptSignal(signal, PROVIDER_TIMEOUT_MS),
-  });
-  if (!res.ok) {
-    const body = (await res.text().catch(() => "")).slice(0, 200);
-    throw new Error(`Brave: HTTP ${res.status}${body ? ` — ${body}` : ""}`);
-  }
-  const text = await res.text();
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error("Brave: non-JSON response");
-  }
-  return parseBraveResults(json).slice(0, count);
 }
 
 export interface SearchProviderSpec {
@@ -517,15 +466,6 @@ export async function searchWeb(
         name: `searxng:${safeHostname(u)}`,
         search: (q: string, n: number, s?: AbortSignal) => searchSearxng(q, n, u, s),
       })),
-      ...(process.env.PI_BRAVE_API_KEY
-        ? [
-            {
-              name: "brave",
-              search: (q: string, n: number, s?: AbortSignal) =>
-                searchBrave(q, n, process.env.PI_BRAVE_API_KEY as string, s),
-            },
-          ]
-        : []),
     ];
 
   const failures: string[] = [];
