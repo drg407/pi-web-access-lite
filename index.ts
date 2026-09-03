@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web. Primary: keyless DuckDuckGo; automatic fallback to SearXNG (PI_SEARXNG_URL) and Brave (PI_BRAVE_API_KEY) when configured. Output names the provider that answered. Returns titles, URLs, snippets. Use fetch_page to read a result in full.",
+      "Search the web. Primary: keyless DuckDuckGo; automatic fallback to SearXNG (PI_SEARXNG_URL) when configured. Output names the provider that answered. Returns titles, URLs, snippets. Use fetch_page to read a result in full.",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
       num_results: Type.Optional(

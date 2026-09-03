@@ -6,6 +6,14 @@ when you suspect the external contracts changed (DDG markup, endpoints).
 
 ## 2026-09-02
 
+### Brave provider REMOVED
+
+`PI_BRAVE_API_KEY` / `searchBrave` / `parseBraveResults` and their tests were deleted:
+Brave Search API signup requires a real credit card, so the "no keys, no friction" fallback
+design it promised does not hold in practice. The chain is now DuckDuckGo → SearXNG only.
+(ToS itself was reviewed the same day and found unalarming for personal use — the removal
+is a friction/credential-policy decision, not a contractual one.)
+
 ### SearXNG official image: JSON API is DISABLED by default (deployment gotcha)
 
 - `GET /search?q=...&format=json` against the stock official image (podman, no config
@@ -114,13 +122,11 @@ Known residual risk (accepted): DNS rebinding between validation and connect is 
   `{query, results: [result dicts], answers, corrections, infoboxes, suggestions, unresponsive_engines}`;
   result dicts carry `title`, `url`, `content`.
 
-**Brave Web Search API** — from official docs (api-dashboard.search.brave.com):
-- `GET https://api.search.brave.com/res/v1/web/search?q=...&count=N` (count max 20), header
-  `X-Subscription-Token: <key>`, body `{web: {results: [{title, url, description, ...}]}}`.
+The Brave Web Search API was also verified from official docs at build time, then **removed
+from the extension on 2026-09-02** because signup requires a real credit card (see below).
 
-Live calls to Brave/SearXNG were NOT executed (no key / no reachable instance available at
-build time); HTTP+parse layers are covered by in-process loopback mock-server tests in
-`test.ts`, and parsers by fixture tests.
+SearXNG's HTTP+parse layers are covered by in-process loopback mock-server tests in
+`test.ts`; live calls to a real instance were verified 2026-09-02 (section below).
 
 ### Public SearXNG instance survey (why self-hosting is the recommendation)
 

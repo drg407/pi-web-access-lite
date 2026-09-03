@@ -3,7 +3,7 @@
 ## About
 
 Two small web tools for the [pi](https://pi.dev) coding agent: **`web_search`** (keyless
-DuckDuckGo with automatic SearXNG / Brave fallback) and **`fetch_page`** (SSRF-safe page
+DuckDuckGo with automatic SearXNG fallback) and **`fetch_page`** (SSRF-safe page
 fetching). Zero npm dependencies, zero API keys required — plain Node built-ins only.
 
 Built because the popular [`pi-web-access`](https://pi.dev/packages/pi-web-access) package
@@ -11,11 +11,11 @@ Built because the popular [`pi-web-access`](https://pi.dev/packages/pi-web-acces
 providers alone plus video/PDF understanding — and for everyday research you mostly just
 need *search* and *fetch*, without the supply chain.
 
-The whole network behaviour of this extension fits in two source files (616 lines total).
+The whole network behaviour of this extension fits in two source files (556 lines total).
 There is no `node_modules`, no lockfile, and no third-party code anywhere in the chain —
 the audit is the code.
 
-**Current state (2026-09-02):** 49/49 offline tests passing; live-verified end-to-end
+**Current state (2026-09-02):** 44/44 offline tests passing; live-verified end-to-end
 through pi's loader, including the fallback chain answering for a rate-limited DuckDuckGo
 against a self-hosted SearXNG instance. See `VERIFIED.md` for commands, outputs, and dates.
 
@@ -23,10 +23,10 @@ against a self-hosted SearXNG instance. See `VERIFIED.md` for commands, outputs,
 
 | | pi-web-access (npm) | pi-web-access-lite (this) |
 |---|---|---|
-| Size | 7.6 MB, 73 files, 9 deps (v0.27.0) | 616 lines, 2 source files, **0 deps** |
+| Size | 7.6 MB, 73 files, 9 deps (v0.27.0) | 556 lines, 2 source files, **0 deps** |
 | npm supply chain | 9 runtime deps to audit | nothing to audit — no `node_modules`, no lockfile |
 | API keys | optional (20+ providers) | none (DuckDuckGo HTML endpoint) |
-| Search | multiple hosted backends w/ fallbacks | DuckDuckGo (keyless) + optional SearXNG / Brave fallbacks |
+| Search | multiple hosted backends w/ fallbacks | DuckDuckGo (keyless) + optional SearXNG fallback |
 | Fetch | markdown extract, PDF, video, GitHub/YouTube special-casing | HTML→text, JSON/raw, 40K truncation |
 | SSRF protection | yes (remote fetchers opt-in) | **always on**: private/loopback/link-local/metadata blocked, every redirect hop re-validated |
 | Audit effort | read a package | read 2 files |
@@ -54,7 +54,6 @@ fallback attempts after cancellation).
 |---|---|---|---|
 | 1 | DuckDuckGo | none (keyless) | default |
 | 2..n | SearXNG instances | `PI_SEARXNG_URL="http://host1:8080,http://host2:8080"` | **self-hosted recommended** — queries never leave your machine. The instance must enable the JSON format (see example below — the official image does NOT) |
-| last | Brave Search | `PI_BRAVE_API_KEY="BSA..."` | free tier available; Brave does not track queries; independent index |
 
 Example — fully private search fallback via a local SearXNG (docker **or** podman, both
 verified):
@@ -159,7 +158,7 @@ node --experimental-strip-types test.ts
 
 - `web-core.ts` — zero-dependency core: search, fetch, SSRF validation, HTML→text, entities.
 - `index.ts` — `pi.registerTool()` wiring for the two tools.
-- `test.ts` — 49 offline tests (network behaviour is recorded in `VERIFIED.md`, not tested).
+- `test.ts` — 44 offline tests (network behaviour is recorded in `VERIFIED.md`, not tested).
 - `VERIFIED.md` — live network verifications with commands, real outputs, and dates. Re-run
   when you suspect the DuckDuckGo markup contract changed.
 
@@ -167,11 +166,12 @@ node --experimental-strip-types test.ts
 
 - No PDF/video/GitHub-special-casing — that's what the bigger package is for.
 - DuckDuckGo's HTML endpoint rate-limits aggressive use (~10 fast requests); normal research
-  cadence is fine. With a SearXNG/Brave fallback configured, the chain absorbs those
+  cadence is fine. With a SearXNG fallback configured, the chain absorbs those
   incidents automatically; without one, the tool throws a clear error rather than returning
   garbage.
 - SearXNG fallback requires a reachable instance (self-hosted recommended — public instances
-  are bot-walled, see above). Brave requires a (free-tier) API key.
+  are bot-walled, see above). No API keys of any kind are required or used by this
+  extension.
 - Output truncated at 40K chars (context-window protection, not a bug).
 
 ## License
