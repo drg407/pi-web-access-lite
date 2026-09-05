@@ -1,6 +1,7 @@
 {
   "name": "pi-web-access-lite",
   "version": "0.1.0",
+  "type": "module",
   "description": "Minimal web tools for the pi coding agent: keyless DuckDuckGo search + SSRF-safe page fetching. Zero npm dependencies.",
   "keywords": [
     "pi-package"
