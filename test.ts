@@ -94,6 +94,21 @@ await t("entities: unknown named entity passes through", () => {
 await t("entities: mixed numeric and named in one string", () => {
   assert.equal(decodeEntities("&#169; = &copy;"), "© = ©");
 });
+await t("entities: uppercase X in hex (&#X41;)", () => {
+  assert.equal(decodeEntities("&#X41;&#x42;"), "AB");
+});
+await t("entities: double-encoded &amp;lt; stays &lt; (single pass)", () => {
+  assert.equal(decodeEntities("&amp;lt;"), "&lt;");
+});
+await t("entities: ampersand at end of input", () => {
+  assert.equal(decodeEntities("price: &"), "price: &");
+});
+await t("entities: consecutive entities", () => {
+  assert.equal(decodeEntities("&lt;&gt;"), "<>");
+});
+await t("entities: ceiling/floor/angle brackets", () => {
+  assert.equal(decodeEntities("&lceil;x&rceil; &lfloor;y&rfloor; &lang;z&rang;"), "⌈x⌉ ⌊y⌋ ⟨z⟩");
+});
 
 // ---------- htmlToText (offline) ----------
 const SAMPLE = `<html><head><title>T</title><style>body{color:red}</style><script>var x=1;</script></head>
