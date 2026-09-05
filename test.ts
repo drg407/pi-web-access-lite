@@ -59,6 +59,42 @@ await t("entities: empty string", () => {
   assert.equal(decodeEntities(""), "");
 });
 
+await t("entities: typography (mdash, hellip, ldquo/rdquo)", () => {
+  assert.equal(decodeEntities("&mdash;&hellip;&ldquo;hi&rdquo;"), '—…“hi”');
+});
+await t("entities: currency (euro, pound, yen)", () => {
+  assert.equal(decodeEntities("&euro;100 &pound;50 &yen;200"), "€100 £50 ¥200");
+});
+await t("entities: math (le, ge, ne, infin)", () => {
+  assert.equal(decodeEntities("x &le; &infin; &ne; 0"), "x ≤ ∞ ≠ 0");
+});
+await t("entities: arrows (larr, rarr, crarr)", () => {
+  assert.equal(decodeEntities("&larr;&rarr;&crarr;"), "←→↵");
+});
+await t("entities: greek (alpha, Omega, pi)", () => {
+  assert.equal(decodeEntities("&alpha;&Omega;&pi;"), "αΩπ");
+});
+await t("entities: latin accented (eacute, uuml, ntilde)", () => {
+  assert.equal(decodeEntities("caf&eacute; na&iuml;ve &ntilde;"), "café naïve ñ");
+});
+await t("entities: fractions (frac12, frac14, frac34)", () => {
+  assert.equal(decodeEntities("&frac14; + &frac34; = 1"), "¼ + ¾ = 1");
+});
+await t("entities: symbols (trade, copy, reg, deg)", () => {
+  assert.equal(decodeEntities("&trade; &copy; &reg; 90&deg;"), "™ © ® 90°");
+});
+await t("entities: sdot is dot operator U+22C5, not middot", () => {
+  assert.equal(decodeEntities("&sdot;"), "⋅");
+  assert.equal(decodeEntities("&middot;"), "·");
+  assert.notEqual(decodeEntities("&sdot;"), decodeEntities("&middot;"));
+});
+await t("entities: unknown named entity passes through", () => {
+  assert.equal(decodeEntities("&bogus; text"), "&bogus; text");
+});
+await t("entities: mixed numeric and named in one string", () => {
+  assert.equal(decodeEntities("&#169; = &copy;"), "© = ©");
+});
+
 // ---------- htmlToText (offline) ----------
 const SAMPLE = `<html><head><title>T</title><style>body{color:red}</style><script>var x=1;</script></head>
 <body><h1>Title Here</h1><p>First &amp; second <b>bold</b>.</p>
