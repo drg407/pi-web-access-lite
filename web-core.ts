@@ -43,7 +43,8 @@ const NAMED_ENTITIES: Record<string, string> = {
   isin: "∈", notin: "∉", sub: "⊂", sup: "⊃", sube: "⊆", supe: "⊇",
   cap: "∩", cup: "∪", and: "∧", or: "∨", not: "¬",
   ang: "∠", sdot: "⋅", lowast: "∗",
-  oplus: "⊕", otimes: "⊗", perp: "⊥", there4: "∴", sim: "∼", cong: "≅",
+  lceil: "⌈", rceil: "⌉", lfloor: "⌊", rfloor: "⌋", lang: "⟨", rang: "⟩",
+  oplus: "⊕", otimes: "⊗", perp: "⊥", there4: "∴", sim: "∼", cong: "≅", weierp: "℘",
   larr: "←", rarr: "→", uarr: "↑", darr: "↓", harr: "↔", crarr: "↵",
   lArr: "⇐", rArr: "⇒", uArr: "⇑", dArr: "⇓", hArr: "⇔",
   frac12: "½", frac14: "¼", frac34: "¾",
@@ -89,9 +90,9 @@ const NAMED_ENTITIES: Record<string, string> = {
 /** Decode HTML entities. Single-pass: numeric (&#x...; &#...;) and named (&name;).
  *  Unknown named entities pass through unchanged. Malformed entities never crash. */
 export function decodeEntities(s: string): string {
-  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, inner: string) => {
-    if (inner.startsWith("#x")) return safeFromCode(parseInt(inner.slice(2), 16));
-    if (inner.startsWith("#")) return safeFromCode(parseInt(inner.slice(1), 10));
+  return s.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, inner: string) => {
+    if (inner[0] === "#" && (inner[1] === "x" || inner[1] === "X")) return safeFromCode(parseInt(inner.slice(2), 16));
+    if (inner[0] === "#") return safeFromCode(parseInt(inner.slice(1), 10));
     return NAMED_ENTITIES[inner] ?? match;
   });
 }
