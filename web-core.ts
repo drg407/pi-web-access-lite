@@ -16,6 +16,32 @@ export const USER_AGENT =
 
 export const MAX_CHARS = 40_000;
 
+class TtlCache<T> {
+  private store = new Map<string, { value: T; expires: number }>();
+  private ttlMs: number;
+  constructor(ttlMs: number) { this.ttlMs = ttlMs; }
+  get(key: string): T | undefined {
+    const entry = this.store.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expires) { this.store.delete(key); return undefined; }
+    return entry.value;
+  }
+  set(key: string, value: T): void {
+    if (this.store.size > 200) {
+      const now = Date.now();
+      for (const [k, v] of this.store) { if (now > v.expires) this.store.delete(k); }
+      if (this.store.size > 200) {
+        const oldest = this.store.keys().next().value!;
+        this.store.delete(oldest);
+      }
+    }
+    this.store.set(key, { value, expires: Date.now() + this.ttlMs });
+  }
+}
+
+const searchCache = new TtlCache<SearchHit[]>(15 * 60_000);
+const fetchCache = new TtlCache<{ url: string; status: number; contentType: string; text: string; truncated: boolean; totalChars: number }>(30 * 60_000);
+
 function safeFromCode(code: number): string {
   if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return "";
   try {
@@ -308,6 +334,9 @@ export async function searchDuckDuckGo(
   numResults = 8,
   signal?: AbortSignal,
 ): Promise<SearchHit[]> {
+  const wait = DDG_MIN_INTERVAL_MS - (Date.now() - ddgLastCallMs);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  ddgLastCallMs = Date.now();
   const endpoint = "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query);
   const res = await fetch(endpoint, {
     headers: { "user-agent": USER_AGENT },
@@ -360,6 +389,8 @@ export async function fetchPage(
   opts: { maxChars?: number; signal?: AbortSignal } = {},
 ): Promise<FetchedPage> {
   const maxChars = opts.maxChars ?? MAX_CHARS;
+  const cached = fetchCache.get(rawUrl);
+  if (cached) return cached;
   let currentUrl = await validatePublicUrl(rawUrl);
 
   let res: Response;
@@ -410,7 +441,7 @@ export async function fetchPage(
 
   const totalChars = text.length;
   if (text.length > maxChars) text = text.slice(0, maxChars);
-  return {
+  const result: FetchedPage = {
     url: res.url || currentUrl.toString(),
     status: res.status,
     contentType,
@@ -418,6 +449,8 @@ export async function fetchPage(
     truncated: totalChars > maxChars,
     totalChars,
   };
+  fetchCache.set(rawUrl, result);
+  return result;
 }
 
 // ====================== Search providers & fallbacks ======================
@@ -436,6 +469,8 @@ export async function fetchPage(
 // SSRF guard does not apply here — the model cannot influence which instance is used.
 
 const PROVIDER_TIMEOUT_MS = 8_000;
+const DDG_MIN_INTERVAL_MS = 3_000;
+let ddgLastCallMs = 0;
 
 /** Combine the caller's abort signal with a per-attempt timeout (never wait unbounded). */
 function attemptSignal(signal: AbortSignal | undefined, ms: number): AbortSignal {
@@ -582,8 +617,8 @@ export async function searchWeb(
   const chain: SearchProviderSpec[] =
     providers ??
     [
-      ...(braveKey ? [{ name: "brave", search: (q: string, n: number, s?: AbortSignal) => searchBrave(q, n, braveKey, s) }] : []),
       { name: "duckduckgo", search: (q, n, s) => searchDuckDuckGo(q, n, attemptSignal(s, PROVIDER_TIMEOUT_MS)) },
+      ...(braveKey ? [{ name: "brave", search: (q: string, n: number, s?: AbortSignal) => searchBrave(q, n, braveKey, s) }] : []),
       ...searxngInstancesFromEnv().map((u) => ({
         name: `searxng:${safeHostname(u)}`,
         search: (q: string, n: number, s?: AbortSignal) => searchSearxng(q, n, u, s),
@@ -593,7 +628,11 @@ export async function searchWeb(
   const failures: string[] = [];
   for (const p of chain) {
     try {
+      const cacheKey = `${p.name}:${query}:${numResults}`;
+      const cached = searchCache.get(cacheKey);
+      if (cached) return { provider: `${p.name}(cached)`, hits: cached };
       const hits = await p.search(query, numResults, signal);
+      searchCache.set(cacheKey, hits);
       return { provider: p.name, hits };
     } catch (e) {
       if (signal?.aborted) throw e;
