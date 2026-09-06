@@ -433,6 +433,53 @@ await t("ddg: rapid calls don't crash (rate limiter waits)", async () => {
   assert.equal(typeof searchDuckDuckGo, "function");
 });
 
+// ---------- TtlCache (via searchWeb — cache is module-private) ----------
+await t("cache: different numResults is a separate cache key", async () => {
+  let callCount = 0;
+  const countingP: SearchProviderSpec = {
+    name: "counter-nr",
+    search: async () => { callCount++; return [{ title: "t", url: "https://a.example", snippet: "" }]; },
+  };
+  await searchWeb("cache-test-numresults-a", 3, undefined, [countingP]);
+  await searchWeb("cache-test-numresults-a", 5, undefined, [countingP]);
+  assert.equal(callCount, 2, "different numResults should be separate cache entries");
+});
+await t("cache: cached result has identical hits", async () => {
+  const hit = { title: "cached-data", url: "https://cache.example", snippet: "s" };
+  const p: SearchProviderSpec = { name: "echo", search: async () => [hit] };
+  const r1 = await searchWeb("cache-test-identical-hits", 3, undefined, [p]);
+  const r2 = await searchWeb("cache-test-identical-hits", 3, undefined, [p]);
+  assert.deepEqual(r1.hits, r2.hits);
+  assert.equal(r2.provider, "echo(cached)");
+});
+
+// ---------- htmlToText edge cases ----------
+await t("htmlToText: nested inline tags preserve text flow", () => {
+  const out = htmlToText("<p>Hello <b>bold <i>italic</i></b> world</p>");
+  assert.ok(out.includes("Hello bold italic world"), `got: ${out}`);
+});
+
+await t("htmlToText: multiple block tags produce newlines not run-on", () => {
+  const out = htmlToText("<h1>Title</h1><p>Para1</p><p>Para2</p>");
+  assert.ok(out.includes("Title"), `got: ${out}`);
+  assert.ok(out.includes("Para1"), `got: ${out}`);
+  assert.ok(out.includes("Para2"), `got: ${out}`);
+  // Should not be "TitlePara1Para2"
+  assert.ok(!out.includes("TitlePara1"), `block tags should separate: ${out}`);
+});
+
+await t("htmlToText: br tag produces newline", () => {
+  const out = htmlToText("line1<br>line2<br/>line3");
+  assert.ok(out.includes("line1\nline2\nline3"), `got: ${JSON.stringify(out)}`);
+});
+
+await t("htmlToText: noscript and svg stripped", () => {
+  const out = htmlToText("<noscript>hidden</noscript><svg><text>icon</text></svg>visible");
+  assert.ok(out.includes("visible"));
+  assert.ok(!out.includes("hidden"));
+  assert.ok(!out.includes("icon"));
+});
+
 // ---------- Brave parser (offline fixture) ----------
 await t("brave parse: valid fixture returns hits", () => {
   const hits = parseBraveResults({
