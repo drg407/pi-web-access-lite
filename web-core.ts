@@ -422,10 +422,12 @@ export async function fetchPage(
 
 // ====================== Search providers & fallbacks ======================
 //
-// Chain: DuckDuckGo (keyless, default) -> SearXNG (PI_SEARXNG_URL, comma-separated
-// instance URLs — self-hosted strongly recommended: queries never leave your machine).
+// Chain: Brave API (PI_BRAVE_API_KEY, when set) -> DuckDuckGo (keyless) ->
+// SearXNG (PI_SEARXNG_URL, comma-separated instance URLs).
 //
 // Contract verified 2026-07-09 against primary sources:
+// - Brave: api.search.brave.com/res/v1/web/search?q=... with X-Subscription-Token
+//   header. Returns {web: {results: [{title, url, description, ...}]}}.
 // - SearXNG: searx/webapp.py + searx/webutils.py (master). GET /search?format=json
 //   -> {query, results: [{title, url, content, ...}]}; HTTP 403 when the instance's
 //   settings.search.formats lacks "json"; errors come back as {"error": "..."}.
@@ -440,6 +442,60 @@ function attemptSignal(signal: AbortSignal | undefined, ms: number): AbortSignal
   const parts: AbortSignal[] = [AbortSignal.timeout(ms)];
   if (signal) parts.push(signal);
   return AbortSignal.any(parts);
+}
+
+/** Parse a Brave Web Search API response into hits. */
+export function parseBraveResults(json: unknown): SearchHit[] {
+  if (typeof json !== "object" || json === null) {
+    throw new Error("Brave: response is not a JSON object");
+  }
+  const obj = json as Record<string, unknown>;
+  const web = obj.web as Record<string, unknown> | undefined;
+  if (!web || !Array.isArray(web.results)) {
+    throw new Error("Brave: response has no web.results[]");
+  }
+  return web.results
+    .map((r): SearchHit => {
+      const o = (typeof r === "object" && r !== null ? r : {}) as Record<string, unknown>;
+      return {
+        title: typeof o.title === "string" ? o.title.trim() : "",
+        url: typeof o.url === "string" ? o.url : "",
+        snippet: typeof o.description === "string" ? o.description.replace(/\s+/g, " ").trim() : "",
+      };
+    })
+    .filter((h) => h.title && h.url);
+}
+
+/** Query the Brave Web Search API. Requires PI_BRAVE_API_KEY. */
+export async function searchBrave(
+  query: string,
+  numResults: number,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<SearchHit[]> {
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${Math.min(numResults, 20)}`;
+  const res = await fetch(url, {
+    headers: {
+      "X-Subscription-Token": apiKey,
+      accept: "application/json",
+    },
+    signal: attemptSignal(signal, PROVIDER_TIMEOUT_MS),
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`Brave API: HTTP ${res.status} — invalid or expired API key`);
+  }
+  if (res.status === 429) {
+    throw new Error("Brave API: HTTP 429 — rate limited");
+  }
+  if (!res.ok) throw new Error(`Brave API: HTTP ${res.status}`);
+  const text = await res.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error("Brave API: non-JSON response");
+  }
+  return parseBraveResults(json).slice(0, Math.max(1, Math.min(numResults, 20)));
 }
 
 /** Parse a SearXNG JSON response into hits. Throws on malformed/error responses. */
@@ -501,6 +557,11 @@ export interface WebSearchResult {
   hits: SearchHit[];
 }
 
+/** Brave API key from PI_BRAVE_API_KEY. */
+export function braveApiKeyFromEnv(): string {
+  return (process.env.PI_BRAVE_API_KEY ?? "").trim();
+}
+
 /** SearXNG instance URLs from PI_SEARXNG_URL (comma-separated). */
 export function searxngInstancesFromEnv(): string[] {
   return (process.env.PI_SEARXNG_URL ?? "")
@@ -517,9 +578,11 @@ export async function searchWeb(
   signal?: AbortSignal,
   providers?: SearchProviderSpec[],
 ): Promise<WebSearchResult> {
+  const braveKey = braveApiKeyFromEnv();
   const chain: SearchProviderSpec[] =
     providers ??
     [
+      ...(braveKey ? [{ name: "brave", search: (q: string, n: number, s?: AbortSignal) => searchBrave(q, n, braveKey, s) }] : []),
       { name: "duckduckgo", search: (q, n, s) => searchDuckDuckGo(q, n, attemptSignal(s, PROVIDER_TIMEOUT_MS)) },
       ...searxngInstancesFromEnv().map((u) => ({
         name: `searxng:${safeHostname(u)}`,
@@ -545,5 +608,45 @@ function safeHostname(u: string): string {
     return new URL(u).hostname;
   } catch {
     return u;
+  }
+}
+
+// ====================== PDF text extraction ======================
+
+/**
+ * Extract text from a PDF file using poppler's pdftotext.
+ * Requires `pdftotext` on PATH (brew install poppler).
+ */
+export function readPdf(filePath: string, options?: { pages?: string }): string {
+  const { execSync } = require("node:child_process");
+  const { existsSync } = require("node:fs");
+  const { resolve } = require("node:path");
+
+  const resolved = resolve(filePath);
+  if (!existsSync(resolved)) {
+    throw new Error(`PDF file not found: ${resolved}`);
+  }
+
+  const args = ["pdftotext"];
+  if (options?.pages) {
+    const match = options.pages.match(/^(\d+)(?:-(\d+))?$/);
+    if (match) {
+      args.push("-f", match[1]);
+      if (match[2]) args.push("-l", match[2]);
+    }
+  }
+  args.push("-layout", resolved, "-");
+
+  try {
+    const result = execSync(args.join(" "), {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 30_000,
+    });
+    return result.toString("utf-8").trim();
+  } catch (e: any) {
+    if (e.status !== undefined) {
+      throw new Error(`pdftotext failed (exit ${e.status}): ${e.stderr?.toString() || "unknown error"}`);
+    }
+    throw e;
   }
 }

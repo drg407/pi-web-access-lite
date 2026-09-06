@@ -2,9 +2,10 @@
 
 ## About
 
-Two small web tools for the [pi](https://pi.dev) coding agent: **`web_search`** (keyless
-DuckDuckGo with automatic SearXNG fallback) and **`fetch_page`** (SSRF-safe page
-fetching). Zero npm dependencies, zero API keys required — plain Node built-ins only.
+Two small web tools for the [pi](https://pi.dev) coding agent: **`web_search`** (Brave
+Search API when `PI_BRAVE_API_KEY` is set, with automatic keyless DuckDuckGo → SearXNG
+fallback) and **`fetch_page`** (SSRF-safe page fetching). Zero npm dependencies, no API
+keys required by default — plain Node built-ins only.
 
 Built because the popular [`pi-web-access`](https://pi.dev/packages/pi-web-access) package
 (v0.27.0, measured 2026-09-02) is 7.6 MB / 73 files / 9 runtime deps, with 12 hosted fetch
@@ -25,8 +26,8 @@ against a self-hosted SearXNG instance. See `VERIFIED.md` for commands, outputs,
 |---|---|---|
 | Size | 7.6 MB, 73 files, 9 deps (v0.27.0) | 556 lines, 2 source files, **0 deps** |
 | npm supply chain | 9 runtime deps to audit | nothing to audit — no `node_modules`, no lockfile |
-| API keys | optional (20+ providers) | none (DuckDuckGo HTML endpoint) |
-| Search | multiple hosted backends w/ fallbacks | DuckDuckGo (keyless) + optional SearXNG fallback |
+| API keys | optional (20+ providers) | none by default (optional Brave key) |
+| Search | multiple hosted backends w/ fallbacks | Brave (opt. key) → DuckDuckGo (keyless) → SearXNG fallback |
 | Fetch | markdown extract, PDF, video, GitHub/YouTube special-casing | HTML→text, JSON/raw, 40K truncation |
 | SSRF protection | yes (remote fetchers opt-in) | **always on**: private/loopback/link-local/metadata blocked, every redirect hop re-validated |
 | Audit effort | read a package | read 2 files |
@@ -37,7 +38,8 @@ quarter-hour**, and there is no third-party code anywhere in the chain.
 ## Tools
 
 ### `web_search`
-Keyless DuckDuckGo search. Returns numbered title / URL / snippet lists.
+Search via the Brave Search API (when `PI_BRAVE_API_KEY` is set) with automatic keyless
+DuckDuckGo → SearXNG fallback. Returns numbered title / URL / snippet lists.
 
 ```ts
 web_search({ query: "godot 4 RayCast3D" })
@@ -52,8 +54,9 @@ fallback attempts after cancellation).
 
 | Order | Provider | Config | Notes |
 |---|---|---|---|
-| 1 | DuckDuckGo | none (keyless) | default |
-| 2..n | SearXNG instances | `PI_SEARXNG_URL="http://host1:8080,http://host2:8080"` | **self-hosted recommended** — queries never leave your machine. The instance must enable the JSON format (see example below — the official image does NOT) |
+| 1 | Brave Search API | `PI_BRAVE_API_KEY` (free tier: $5/mo ≈ 1,000 queries) | used only when the key is set |
+| 2 | DuckDuckGo | none (keyless) | default when no Brave key |
+| 3..n | SearXNG instances | `PI_SEARXNG_URL="http://host1:8080,http://host2:8080"` | **self-hosted recommended** — queries never leave your machine. The instance must enable the JSON format (see example below — the official image does NOT) |
 
 Example — fully private search fallback via a local SearXNG (docker **or** podman, both
 verified):
@@ -147,6 +150,15 @@ rm -rf ~/.pi/agent/extensions/web-access             # for option B
 > **Note:** if you install via option A while a manual copy from option B still exists, you'll
 > have duplicate registrations — remove the manual copy.
 
+## Configuration (env vars)
+
+All configuration is via environment variables — there is no config file. None are required.
+
+| Variable | Required | Effect |
+|---|---|---|
+| `PI_BRAVE_API_KEY` | no | Enables the Brave Search API as the primary provider. Free tier is $5/mo (≈ 1,000 queries). When unset, `web_search` falls back to keyless DuckDuckGo. |
+| `PI_SEARXNG_URL` | no | Comma-separated list of SearXNG instance URLs used as the last fallback. |
+
 ## Development
 
 No build step, no dependencies. The core (`web-core.ts`) runs under plain Node with type
@@ -166,12 +178,13 @@ node --experimental-strip-types test.ts
 
 - No PDF/video/GitHub-special-casing — that's what the bigger package is for.
 - DuckDuckGo's HTML endpoint rate-limits aggressive use (~10 fast requests); normal research
-  cadence is fine. With a SearXNG fallback configured, the chain absorbs those
+  cadence is fine. Setting `PI_BRAVE_API_KEY` makes Brave the primary provider and keeps
+  DuckDuckGo as the fallback; with a SearXNG fallback configured, the chain absorbs those
   incidents automatically; without one, the tool throws a clear error rather than returning
   garbage.
 - SearXNG fallback requires a reachable instance (self-hosted recommended — public instances
-  are bot-walled, see above). No API keys of any kind are required or used by this
-  extension.
+  are bot-walled, see above). The only key this extension ever uses is the optional
+  `PI_BRAVE_API_KEY`; nothing else is required.
 - Output truncated at 40K chars (context-window protection, not a bug).
 
 ## License
